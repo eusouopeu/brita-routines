@@ -1,0 +1,13 @@
+# Dependencies
+node_modules/
+
+# Build output
+main.js
+*.js.map
+
+# Env / editor
+.env
+.DS_Store
+
+# Obsidian plugin data (per-vault)
+data.json
