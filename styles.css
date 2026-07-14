@@ -1,1 +1,82 @@
 /* Brita Routines */
+
+.brita-timer {
+	display: flex;
+	flex-direction: column;
+	gap: var(--size-4-3);
+	padding: var(--size-4-3);
+}
+
+.brita-header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: var(--size-4-2);
+}
+
+.brita-routine-name {
+	margin: 0;
+}
+
+.brita-countdown {
+	text-align: center;
+	padding: var(--size-4-4) 0;
+	border-radius: var(--radius-m);
+	background-color: var(--background-secondary);
+}
+
+.brita-step-name {
+	font-size: var(--font-ui-medium);
+	color: var(--text-muted);
+	margin-bottom: var(--size-4-1);
+}
+
+.brita-step-time {
+	font-size: 2.6em;
+	font-variant-numeric: tabular-nums;
+	font-weight: var(--font-bold);
+	line-height: 1.1;
+}
+
+.brita-total-time {
+	margin-top: var(--size-4-2);
+	font-size: var(--font-ui-smaller);
+	color: var(--text-faint);
+	font-variant-numeric: tabular-nums;
+}
+
+.brita-controls {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--size-4-2);
+	justify-content: center;
+}
+
+.brita-steps {
+	margin: 0;
+	padding-left: var(--size-4-5);
+	display: flex;
+	flex-direction: column;
+	gap: var(--size-4-1);
+}
+
+.brita-step {
+	display: flex;
+	justify-content: space-between;
+	gap: var(--size-4-2);
+}
+
+.brita-step.is-current .brita-step-label {
+	font-weight: var(--font-bold);
+	color: var(--text-accent);
+}
+
+.brita-step.is-done {
+	color: var(--text-faint);
+	text-decoration: line-through;
+}
+
+.brita-step-duration {
+	font-variant-numeric: tabular-nums;
+	color: var(--text-muted);
+}
