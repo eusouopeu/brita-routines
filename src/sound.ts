@@ -8,6 +8,9 @@ export function beep(times = 1): void {
 	try {
 		audioContext = audioContext ?? new AudioContext();
 		const ctx = audioContext;
+		// O beep é disparado por timer, não por gesto do usuário — em
+		// algumas configurações o contexto nasce/fica suspenso.
+		if (ctx.state === "suspended") void ctx.resume();
 		for (let i = 0; i < times; i++) {
 			const osc = ctx.createOscillator();
 			const gain = ctx.createGain();
@@ -24,5 +27,13 @@ export function beep(times = 1): void {
 		}
 	} catch {
 		// Áudio indisponível — o Notice ainda avisa.
+	}
+}
+
+/** Libera o AudioContext. Chamado no onunload() do plugin. */
+export function closeAudio(): void {
+	if (audioContext) {
+		void audioContext.close().catch(() => {});
+		audioContext = null;
 	}
 }

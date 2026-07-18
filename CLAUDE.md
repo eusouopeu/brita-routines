@@ -23,8 +23,11 @@ Três camadas, com dependências só de cima para baixo:
   Obsidian: recebe callbacks (`onStepComplete`, `onRoutineComplete`) e expõe
   `subscribe()` + `getSnapshot()` para quem quiser renderizar.
 - **View** (`src/view.ts`) — `RoutineTimerView` (ItemView na sidebar direita).
-  Renderizador puro: não guarda estado próprio; se inscreve no engine ao abrir
-  e redesenha o snapshot inteiro a cada mudança.
+  Não guarda estado de timer; se inscreve no engine ao abrir. Só reconstrói o
+  DOM quando **status ou rotina** mudam; nos demais ticks atualiza no lugar os
+  textos do countdown e as classes `is-done`/`is-current` da lista (refs
+  guardadas em `build()`). Isso preserva foco de teclado, cliques e a região
+  `aria-live` do nome do passo (que anuncia trocas em leitores de tela).
 
 **Onde vive o estado do timer**: no plugin (`main.ts`), que cria o
 `TimerEngine` único em `onload()` e registra o tick (`setInterval` de 250 ms
@@ -33,8 +36,20 @@ a view só (des)inscreve o listener. O engine evita drift guardando o timestamp
 absoluto de término do passo (`stepEndsAt`) quando rodando e `stepRemainingMs`
 quando pausado; o tick recalcula a partir de `Date.now()`.
 
+Detalhes do tick (`TimerEngine.tick()`):
+
+- Só emite quando o **segundo exibido** muda (`lastEmittedSec`) ou um passo
+  avança — não a cada intervalo de 250 ms.
+- Tick atrasado (suspensão do sistema, aba congelada): um laço avança quantos
+  passos couberem no tempo decorrido, ancorando o término de cada passo no
+  término do anterior — o tempo dormido é contabilizado, não descartado.
+
 O som (`src/sound.ts`) é um beep via Web Audio (oscilador), sem assets:
-1 beep ao concluir um passo, 3 ao concluir a rotina. `skip()` avança sem som.
+1 beep ao concluir um passo, 3 ao concluir a rotina. No último passo só toca
+o som de rotina (`onStepComplete` recebe `isLast` e o plugin suprime o beep e
+o Notice do passo). `skip()` avança sem som; pular o último passo encerra a
+rotina **silenciosamente** (sem `onRoutineComplete`). O `AudioContext` é
+retomado se estiver suspenso e fechado em `onunload()` (`closeAudio()`).
 
 ## Formato do arquivo de rotina
 
@@ -51,11 +66,20 @@ Regras do parser (`STEP_LINE` em `src/routine.ts`):
 - Só linhas `- [x] Nome - HH:MM:SS` contam (qualquer caractere dentro dos
   colchetes); todo o resto do arquivo é ignorado.
 - O separador é o **último** ` - ` antes da duração; o nome pode conter hífens.
-- Duração `00:00:00` ou inválida ⇒ linha ignorada.
+- Duração `00:00:00`, inválida, ou com minutos/segundos ≥ 60 ⇒ linha ignorada.
 - Arquivo ausente ou sem passos válidos ⇒ usa `SAMPLE_ROUTINE`.
 
-O botão de recarregar no cabeçalho da view relê o arquivo (e reseta o timer,
-porque `setRoutine()` reseta).
+Recarga da rotina:
+
+- O botão de recarregar no cabeçalho da view relê o arquivo (e reseta o
+  timer, porque `setRoutine()` reseta). Com rotina em andamento
+  (running/paused), pede confirmação (`confirm()`) antes.
+- Editar `Rotina.md` recarrega automaticamente (`vault.on("modify")` em
+  `main.ts`), mas **só com o timer em `idle`** — nunca reseta uma execução
+  em andamento.
+
+Comandos: `open-timer-panel` (abre o painel) e `toggle-timer`
+(iniciar/pausar pela paleta, sem precisar do painel).
 
 ## Convenções
 

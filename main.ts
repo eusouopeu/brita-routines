@@ -1,7 +1,7 @@
 import { Notice, Plugin, TFile } from "obsidian";
 import { TimerEngine } from "./src/engine";
 import { SAMPLE_ROUTINE, parseRoutine } from "./src/routine";
-import { beep } from "./src/sound";
+import { beep, closeAudio } from "./src/sound";
 import { RoutineTimerView, VIEW_TYPE_ROUTINE_TIMER } from "./src/view";
 
 /** Arquivo de rotina lido da raiz do vault (fallback: sample embutido). */
@@ -14,7 +14,10 @@ export default class BritaRoutinesPlugin extends Plugin {
 	async onload() {
 		// O engine vive no plugin: fechar a view não pausa nem reseta o timer.
 		this.engine = new TimerEngine({
-			onStepComplete: (step) => {
+			onStepComplete: (step, _index, isLast) => {
+				// No último passo, onRoutineComplete cuida do aviso — evita
+				// Notice duplo e beep(1) sobreposto ao beep(3).
+				if (isLast) return;
 				new Notice(`Passo concluído: ${step.name}`);
 				beep(1);
 			},
@@ -39,12 +42,36 @@ export default class BritaRoutinesPlugin extends Plugin {
 			callback: () => void this.activateView(),
 		});
 
+		this.addCommand({
+			id: "toggle-timer",
+			name: "Iniciar/pausar rotina",
+			callback: () => {
+				const { status } = this.engine.getSnapshot();
+				if (status === "running") this.engine.pause();
+				else this.engine.start();
+			},
+		});
+
 		this.registerInterval(
 			window.setInterval(() => this.engine.tick(), TICK_INTERVAL_MS),
 		);
 
+		// Recarrega sozinho quando Rotina.md muda — mas só com o timer
+		// parado, para não resetar uma execução em andamento.
+		this.registerEvent(
+			this.app.vault.on("modify", (file) => {
+				if (file.path !== ROUTINE_FILE_PATH) return;
+				if (this.engine.getSnapshot().status !== "idle") return;
+				void this.loadRoutine(false);
+			}),
+		);
+
 		// O índice do vault só está pronto após o layout carregar.
 		this.app.workspace.onLayoutReady(() => void this.loadRoutine(false));
+	}
+
+	onunload(): void {
+		closeAudio();
 	}
 
 	async loadRoutine(notify: boolean): Promise<void> {

@@ -16,8 +16,11 @@ export function parseRoutine(markdown: string, name: string): Routine | null {
 	for (const line of markdown.split(/\r?\n/)) {
 		const m = line.match(STEP_LINE);
 		if (!m) continue;
-		const durationSec =
-			Number(m[2]) * 3600 + Number(m[3]) * 60 + Number(m[4]);
+		const hours = Number(m[2]);
+		const minutes = Number(m[3]);
+		const seconds = Number(m[4]);
+		if (minutes >= 60 || seconds >= 60) continue;
+		const durationSec = hours * 3600 + minutes * 60 + seconds;
 		if (durationSec <= 0) continue;
 		steps.push({ name: m[1], durationSec });
 	}
