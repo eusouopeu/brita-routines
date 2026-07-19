@@ -36,7 +36,6 @@ export class RoutineTimerView extends ItemView {
 	private stepNameEl: HTMLElement | null = null;
 	private stepTimeEl: HTMLElement | null = null;
 	private stepEtaEl: HTMLElement | null = null;
-	private totalTimeEl: HTMLElement | null = null;
 	private routineEtaEl: HTMLElement | null = null;
 	private ringProgressEl: SVGCircleElement | null = null;
 	private stepItems: HTMLElement[] = [];
@@ -110,9 +109,6 @@ export class RoutineTimerView extends ItemView {
 			snapshot.currentStep
 				? `termina às ${formatClock(snapshot.stepRemainingSec)}`
 				: "",
-		);
-		this.totalTimeEl?.setText(
-			`Total restante: ${formatDuration(snapshot.totalRemainingSec)}`,
 		);
 		this.routineEtaEl?.setText(
 			snapshot.status === "finished"
@@ -236,7 +232,6 @@ export class RoutineTimerView extends ItemView {
 			this.stepTimeEl = content.createDiv({ cls: "brita-step-time" });
 			this.stepEtaEl = content.createDiv({ cls: "brita-step-eta" });
 		}
-		this.totalTimeEl = box.createDiv({ cls: "brita-total-time" });
 		this.routineEtaEl = box.createDiv({ cls: "brita-routine-eta" });
 	}
 
