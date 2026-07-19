@@ -2,8 +2,9 @@
 
 Replica a funcionalidade de rotinas do app Brita: rotinas com passos ordenados,
 cada passo com temporizador, e execução guiada (countdown por passo, auto-avanço,
-pausa, som/Notice ao concluir). Este repositório está na fase de protótipo:
-scaffold + painel de timer funcional.
+pausa, som/Notice ao concluir). Suporta múltiplas rotinas (pasta configurável
+do vault, seletor no painel) e histórico de execuções (log markdown
+Dataview-friendly com duração real por passo).
 
 ## Build
 
@@ -20,8 +21,19 @@ Três camadas, com dependências só de cima para baixo:
   Sem dependência do Obsidian.
 - **Engine** (`src/engine.ts`) — `TimerEngine`, a máquina de estados do
   countdown (`idle | running | paused | finished`). Também sem dependência do
-  Obsidian: recebe callbacks (`onStepComplete`, `onRoutineComplete`) e expõe
-  `subscribe()` + `getSnapshot()` para quem quiser renderizar.
+  Obsidian: recebe callbacks (`onStepComplete`, `onRoutineComplete`,
+  `onSessionEnd`) e expõe `subscribe()` + `getSnapshot()` para quem quiser
+  renderizar. Rastreia a sessão para o histórico: `StepRecord` (duração real
+  por passo, **pausas excluídas**; catch-up pós-suspensão registra real =
+  planejado) e `SessionRecord` (início/fim em epoch ms, `activeSec`,
+  `outcome: completed | abandoned`).
+- **Histórico** (`src/history.ts`) — formatação pura (sem Obsidian) de
+  `SessionRecord` em markdown com inline fields do Dataview. Quem escreve no
+  vault é o plugin (`appendSessionToHistory` em `main.ts`, via
+  `vault.process`/`vault.create`).
+- **Settings** (`src/settings.ts`) — `BritaSettings` + `DEFAULT_SETTINGS` +
+  `BritaSettingTab` (pasta de rotinas, arquivo de histórico, toggle de
+  registro). Persistência via `loadData`/`saveData` do plugin.
 - **View** (`src/view.ts`) — `RoutineTimerView` (ItemView na sidebar direita).
   Não guarda estado de timer; se inscreve no engine ao abrir. Só reconstrói o
   DOM quando **status ou rotina** mudam; nos demais ticks atualiza no lugar os
@@ -48,14 +60,32 @@ O som (`src/sound.ts`) é um beep via Web Audio (oscilador), sem assets:
 1 beep ao concluir um passo, 3 ao concluir a rotina. No último passo só toca
 o som de rotina (`onStepComplete` recebe `isLast` e o plugin suprime o beep e
 o Notice do passo). `skip()` avança sem som; pular o último passo encerra a
-rotina **silenciosamente** (sem `onRoutineComplete`). O `AudioContext` é
+rotina **silenciosamente** (sem `onRoutineComplete`), mas a sessão conta como
+`completed` no histórico (o passo fica `skipped`). O `AudioContext` é
 retomado se estiver suspenso e fechado em `onunload()` (`closeAudio()`).
+
+## Rotinas: descoberta e seleção
+
+Toda nota `.md` **direta** da pasta de rotinas (`settings.routinesFolder`,
+default `Rotinas`; o arquivo de histórico é excluído) é uma rotina; o nome é
+o basename. O dropdown no header da view lista `listRoutineFiles()` e troca
+via `setActiveRoutine()` (persiste em `settings.activeRoutinePath`; trocar
+reseta o timer, com `confirm()` se running/paused). Resolução em cascata em
+`loadRoutine()`: selecionada → primeira válida da pasta → `Rotina.md` legado
+na raiz (`LEGACY_ROUTINE_PATH`, compat com a versão de arquivo único) →
+`SAMPLE_ROUTINE`. A cascata só persiste auto-seleção quando
+`activeRoutinePath` é `null` — nunca sobrescreve escolha explícita (a nota
+pode estar só temporariamente inválida no meio de uma edição).
+
+Eventos do vault em `main.ts`: `modify` da rotina carregada/selecionada
+recarrega **só com timer `idle`**; `create`/`delete`/`rename` na pasta
+notificam a view (`onRoutineListChanged`, canal mínimo de listeners no
+plugin) para reconstruir o dropdown; `rename` da ativa atualiza o path
+persistido; `delete` da ativa limpa a seleção.
 
 ## Formato do arquivo de rotina
 
-Lido de **`Rotina.md` na raiz do vault** (constante `ROUTINE_FILE_PATH` em
-`main.ts`). O nome da rotina é o basename do arquivo. Cada passo é uma linha
-de checklist:
+Cada passo é uma linha de checklist:
 
 ```markdown
 - [ ] Nome do passo - HH:MM:SS
@@ -67,24 +97,45 @@ Regras do parser (`STEP_LINE` em `src/routine.ts`):
   colchetes); todo o resto do arquivo é ignorado.
 - O separador é o **último** ` - ` antes da duração; o nome pode conter hífens.
 - Duração `00:00:00`, inválida, ou com minutos/segundos ≥ 60 ⇒ linha ignorada.
-- Arquivo ausente ou sem passos válidos ⇒ usa `SAMPLE_ROUTINE`.
+- Sem passos válidos ⇒ a cascata de `loadRoutine()` segue para o próximo
+  candidato (e por fim `SAMPLE_ROUTINE`).
 
-Recarga da rotina:
-
-- O botão de recarregar no cabeçalho da view relê o arquivo (e reseta o
-  timer, porque `setRoutine()` reseta). Com rotina em andamento
-  (running/paused), pede confirmação (`confirm()`) antes.
-- Editar `Rotina.md` recarrega automaticamente (`vault.on("modify")` em
-  `main.ts`), mas **só com o timer em `idle`** — nunca reseta uma execução
-  em andamento.
+O botão de recarregar no cabeçalho da view relê o arquivo (e reseta o timer,
+porque `setRoutine()` reseta). Com rotina em andamento (running/paused), pede
+confirmação (`confirm()`) antes — mesmo padrão do dropdown de troca.
 
 Comandos: `open-timer-panel` (abre o painel) e `toggle-timer`
 (iniciar/pausar pela paleta, sem precisar do painel).
 
+## Histórico de execuções
+
+Gravado em `settings.historyFilePath` (default `Histórico de Rotinas.md`),
+se `settings.historyEnabled`. Uma entrada por sessão: item de lista com
+inline fields do Dataview, passos como sub-itens — o Dataview indexa listas
+(`file.lists` com `children`), viabilizando dashboards/calendário:
+
+```markdown
+- [rotina:: Rotina da Manhã] [inicio:: 2026-07-18T07:30:12] [fim:: 2026-07-18T07:53:40] [ativo:: 00:22:28] [resultado:: concluída]
+    - [passo:: Alongar] [planejado:: 00:05:00] [real:: 00:05:07] [pulado:: não]
+```
+
+Regras (implementadas no engine, formatadas em `src/history.ts`):
+
+- `ativo`/`real` **excluem pausas**; tempo pausado = `fim - inicio - ativo`.
+- Datas em ISO **local** sem timezone (`formatLocalIso`); durações sempre
+  `HH:MM:SS` (`formatDurationLong` — difere do `formatDuration` da UI).
+- `resultado`: `concluída` (fim natural ou skip do último passo) ou
+  `abandonada` (reset/troca de rotina com ≥1 passo encerrado). Reset antes de
+  qualquer passo terminar não registra nada (ruído). Recarregar o Obsidian no
+  meio também não registra (estado do timer não é persistido).
+- Passos dormidos (catch-up pós-suspensão) registram `real == planejado`.
+- O auto-reload não reage ao log: o handler de `modify` só olha a rotina
+  ativa, e `listRoutineFiles()` exclui o arquivo de histórico.
+
 ## Convenções
 
 - Classes em PascalCase (`TimerEngine`), métodos/variáveis em camelCase,
-  constantes module-level em SCREAMING_SNAKE (`ROUTINE_FILE_PATH`).
+  constantes module-level em SCREAMING_SNAKE (`LEGACY_ROUTINE_PATH`).
 - Arquivos de `src/` em minúsculas, um conceito por arquivo.
 - Classes CSS com prefixo `brita-`; estados como `is-current`/`is-done`.
   Cores e espaçamentos sempre via variáveis CSS do Obsidian (`--text-accent`,
@@ -96,10 +147,15 @@ Comandos: `open-timer-panel` (abre o painel) e `toggle-timer`
 
 ## Fora de escopo por enquanto (decidido, não esquecido)
 
-- **Logging/histórico** de execuções (o Brita registra sessões; aqui nada é
-  persistido — nem o estado do timer sobrevive a recarregar o Obsidian).
-- **Templates** de rotina e múltiplas rotinas (hoje é um único `Rotina.md`
-  fixo; escolher rotina/arquivo virá com settings).
-- **Settings tab** (caminho do arquivo, som on/off, volume, auto-início do
-  próximo passo opcional).
+- **Persistir o estado do timer** entre recargas do Obsidian (sessão em
+  andamento se perde, sem entrada no histórico).
+- **Templates** de rotina.
+- **Settings de som** (on/off, volume) e auto-início opcional do próximo
+  passo.
 - Editar a rotina pela view (hoje é só leitura do markdown).
+- Dashboards embutidos no plugin (o histórico markdown é a base; a
+  visualização fica com Dataview/plugins de calendário do usuário).
+- Rotação/arquivamento do log (cresce indefinidamente; caminho configurável,
+  arquivar é manual).
+- `confirm()` nativo nas confirmações (migrar para `Modal` do Obsidian, um
+  dia).

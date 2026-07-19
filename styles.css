@@ -14,8 +14,11 @@
 	gap: var(--size-4-2);
 }
 
-.brita-routine-name {
-	margin: 0;
+.brita-routine-select {
+	flex: 1;
+	min-width: 0;
+	max-width: 100%;
+	text-overflow: ellipsis;
 }
 
 .brita-countdown {
