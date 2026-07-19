@@ -1,9 +1,21 @@
 import { ItemView, WorkspaceLeaf, setIcon } from "obsidian";
 import type BritaRoutinesPlugin from "../main";
 import { EngineSnapshot, EngineStatus } from "./engine";
-import { Routine, formatDuration } from "./routine";
+import { Routine, formatDuration, totalDurationSec } from "./routine";
 
 export const VIEW_TYPE_ROUTINE_TIMER = "brita-routine-timer";
+
+const SVG_NS = "http://www.w3.org/2000/svg";
+/** Geometria do anel de progresso (viewBox 120×120, raio 54). */
+const RING_RADIUS = 54;
+const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;
+
+/** Horário local HH:MM daqui a `secFromNow` segundos. */
+function formatClock(secFromNow: number): string {
+	const d = new Date(Date.now() + secFromNow * 1000);
+	const pad = (n: number) => String(n).padStart(2, "0");
+	return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
 
 /**
  * Renderizador do estado do TimerEngine. Não guarda estado de timer:
@@ -23,7 +35,10 @@ export class RoutineTimerView extends ItemView {
 	private builtRoutine: Routine | null = null;
 	private stepNameEl: HTMLElement | null = null;
 	private stepTimeEl: HTMLElement | null = null;
+	private stepEtaEl: HTMLElement | null = null;
 	private totalTimeEl: HTMLElement | null = null;
+	private routineEtaEl: HTMLElement | null = null;
+	private ringProgressEl: SVGCircleElement | null = null;
 	private stepItems: HTMLElement[] = [];
 
 	constructor(leaf: WorkspaceLeaf, private plugin: BritaRoutinesPlugin) {
@@ -91,9 +106,30 @@ export class RoutineTimerView extends ItemView {
 	private update(snapshot: EngineSnapshot): void {
 		this.stepNameEl?.setText(snapshot.currentStep?.name ?? "—");
 		this.stepTimeEl?.setText(formatDuration(snapshot.stepRemainingSec));
+		this.stepEtaEl?.setText(
+			snapshot.currentStep
+				? `termina às ${formatClock(snapshot.stepRemainingSec)}`
+				: "",
+		);
 		this.totalTimeEl?.setText(
 			`Total restante: ${formatDuration(snapshot.totalRemainingSec)}`,
 		);
+		this.routineEtaEl?.setText(
+			snapshot.status === "finished"
+				? ""
+				: `Tudo acaba às ${formatClock(snapshot.totalRemainingSec)}`,
+		);
+		if (this.ringProgressEl) {
+			// O arco cresce conforme o passo avança (offset = fração restante).
+			const dur = snapshot.currentStep?.durationSec ?? 0;
+			const frac =
+				dur > 0
+					? Math.min(1, Math.max(0, snapshot.stepRemainingSec / dur))
+					: 0;
+			this.ringProgressEl.style.strokeDashoffset = String(
+				RING_CIRCUMFERENCE * frac,
+			);
+		}
 		this.stepItems.forEach((item, index) => {
 			item.toggleClass(
 				"is-done",
@@ -178,57 +214,125 @@ export class RoutineTimerView extends ItemView {
 
 	private renderCountdown(root: HTMLElement, snapshot: EngineSnapshot): void {
 		const box = root.createDiv({ cls: "brita-countdown" });
+		const wrap = box.createDiv({ cls: "brita-ring-wrap" });
+		this.renderRing(wrap);
+		const content = wrap.createDiv({ cls: "brita-ring-content" });
 		if (snapshot.status === "finished") {
 			this.stepNameEl = null;
 			this.stepTimeEl = null;
-			box.createDiv({ cls: "brita-step-name", text: "Rotina concluída 🎉" });
-			box.createDiv({ cls: "brita-step-time", text: "00:00" });
+			this.stepEtaEl = null;
+			content.createDiv({
+				cls: "brita-step-name",
+				text: "Rotina concluída 🎉",
+			});
+			content.createDiv({ cls: "brita-step-time", text: "00:00" });
 		} else {
 			// aria-live no nome (não no relógio, que muda a cada segundo):
 			// leitores de tela anunciam a troca de passo.
-			this.stepNameEl = box.createDiv({
+			this.stepNameEl = content.createDiv({
 				cls: "brita-step-name",
 				attr: { "aria-live": "polite" },
 			});
-			this.stepTimeEl = box.createDiv({ cls: "brita-step-time" });
+			this.stepTimeEl = content.createDiv({ cls: "brita-step-time" });
+			this.stepEtaEl = content.createDiv({ cls: "brita-step-eta" });
 		}
 		this.totalTimeEl = box.createDiv({ cls: "brita-total-time" });
+		this.routineEtaEl = box.createDiv({ cls: "brita-routine-eta" });
+	}
+
+	/**
+	 * Anel de progresso em SVG: trilha + arco com stroke em degradê. O
+	 * update() só mexe no stroke-dashoffset do arco, sem reconstruir nada.
+	 */
+	private renderRing(wrap: HTMLElement): void {
+		const svg = document.createElementNS(SVG_NS, "svg");
+		svg.setAttribute("viewBox", "0 0 120 120");
+		svg.classList.add("brita-ring");
+
+		const defs = document.createElementNS(SVG_NS, "defs");
+		const grad = document.createElementNS(SVG_NS, "linearGradient");
+		grad.setAttribute("id", "brita-ring-grad");
+		grad.setAttribute("x1", "0");
+		grad.setAttribute("y1", "0");
+		grad.setAttribute("x2", "1");
+		grad.setAttribute("y2", "1");
+		for (const [offset, cssVar] of [
+			["0%", "--brita-accent-1"],
+			["100%", "--brita-accent-2"],
+		]) {
+			const stop = document.createElementNS(SVG_NS, "stop");
+			stop.setAttribute("offset", offset);
+			stop.setAttribute("stop-color", `var(${cssVar})`);
+			grad.appendChild(stop);
+		}
+		defs.appendChild(grad);
+		svg.appendChild(defs);
+
+		const circle = (cls: string): SVGCircleElement => {
+			const el = document.createElementNS(SVG_NS, "circle");
+			el.setAttribute("cx", "60");
+			el.setAttribute("cy", "60");
+			el.setAttribute("r", String(RING_RADIUS));
+			el.setAttribute("fill", "none");
+			el.classList.add(cls);
+			svg.appendChild(el);
+			return el;
+		};
+		circle("brita-ring-track");
+		this.ringProgressEl = circle("brita-ring-progress");
+		this.ringProgressEl.setAttribute("stroke", "url(#brita-ring-grad)");
+		this.ringProgressEl.setAttribute(
+			"stroke-dasharray",
+			String(RING_CIRCUMFERENCE),
+		);
+		// Começa no topo, sentido horário.
+		this.ringProgressEl.setAttribute("transform", "rotate(-90 60 60)");
+		wrap.appendChild(svg);
 	}
 
 	private renderControls(root: HTMLElement, snapshot: EngineSnapshot): void {
 		const controls = root.createDiv({ cls: "brita-controls" });
 		const engine = this.plugin.engine;
 
-		const button = (
+		const iconButton = (
+			icon: string,
 			label: string,
 			onClick: () => void,
-			primary = false,
+			opts: { main?: boolean; disabled?: boolean } = {},
 		): HTMLButtonElement => {
-			const el = controls.createEl("button", { text: label });
-			if (primary) el.addClass("mod-cta");
+			const el = controls.createEl("button", {
+				cls: opts.main ? "brita-ctrl brita-ctrl-main" : "brita-ctrl",
+				attr: { "aria-label": label, title: label },
+			});
+			setIcon(el, icon);
+			if (opts.disabled) el.disabled = true;
 			el.addEventListener("click", onClick);
 			return el;
 		};
 
-		switch (snapshot.status) {
-			case "idle":
-				button("Iniciar", () => engine.start(), true);
-				break;
-			case "running":
-				button("Pausar", () => engine.pause(), true);
-				button("Pular", () => engine.skip());
-				break;
-			case "paused":
-				button("Retomar", () => engine.resume(), true);
-				button("Pular", () => engine.skip());
-				break;
-			case "finished":
-				button("Recomeçar", () => engine.start(), true);
-				break;
+		const inProgress =
+			snapshot.status === "running" || snapshot.status === "paused";
+
+		iconButton("skip-back", "Voltar ao passo anterior", () => engine.back(), {
+			disabled: !inProgress,
+		});
+		if (snapshot.status === "running") {
+			iconButton("pause", "Pausar", () => engine.pause(), { main: true });
+		} else {
+			const label =
+				snapshot.status === "paused"
+					? "Retomar"
+					: snapshot.status === "finished"
+						? "Recomeçar"
+						: "Iniciar";
+			iconButton("play", label, () => engine.start(), { main: true });
 		}
-		if (snapshot.status !== "idle") {
-			button("Resetar", () => engine.reset());
-		}
+		iconButton("skip-forward", "Pular passo", () => engine.skip(), {
+			disabled: !inProgress,
+		});
+		iconButton("rotate-ccw", "Resetar rotina", () => engine.reset(), {
+			disabled: snapshot.status === "idle",
+		});
 	}
 
 	private renderStepList(root: HTMLElement, snapshot: EngineSnapshot): void {
@@ -241,6 +345,12 @@ export class RoutineTimerView extends ItemView {
 				text: formatDuration(step.durationSec),
 			});
 			return item;
+		});
+		const total = root.createDiv({ cls: "brita-steps-total" });
+		total.createSpan({ text: "Duração total" });
+		total.createSpan({
+			cls: "brita-step-duration",
+			text: formatDuration(totalDurationSec(snapshot.routine)),
 		});
 	}
 }

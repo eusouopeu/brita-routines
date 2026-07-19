@@ -143,6 +143,28 @@ export class TimerEngine {
 		this.emit();
 	}
 
+	/**
+	 * Volta ao passo anterior (no primeiro passo, apenas reinicia o passo
+	 * atual). Sem som. O tempo parcial do passo atual é descartado, e o
+	 * registro do passo anterior sai do histórico da sessão — ao terminar
+	 * de novo, ele gera um registro novo.
+	 */
+	back(): void {
+		if (this.status === "idle" || this.status === "finished") return;
+		if (this.stepIndex > 0) {
+			if (this.sessionActive) this.stepRecords.pop();
+			this.resetToStep(this.stepIndex - 1);
+		} else {
+			this.resetToStep(0);
+		}
+		this.stepActiveMs = 0;
+		if (this.status === "running") {
+			this.segmentStartedAt = Date.now();
+			this.stepEndsAt = Date.now() + this.stepRemainingMs;
+		}
+		this.emit();
+	}
+
 	reset(): void {
 		// Abandono: só vira sessão se ao menos um passo terminou; resetar
 		// segundos depois de iniciar é ruído, não histórico.

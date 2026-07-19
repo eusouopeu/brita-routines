@@ -61,8 +61,19 @@ O som (`src/sound.ts`) é um beep via Web Audio (oscilador), sem assets:
 o som de rotina (`onStepComplete` recebe `isLast` e o plugin suprime o beep e
 o Notice do passo). `skip()` avança sem som; pular o último passo encerra a
 rotina **silenciosamente** (sem `onRoutineComplete`), mas a sessão conta como
-`completed` no histórico (o passo fica `skipped`). O `AudioContext` é
-retomado se estiver suspenso e fechado em `onunload()` (`closeAudio()`).
+`completed` no histórico (o passo fica `skipped`). `back()` volta ao passo
+anterior (no primeiro, reinicia o atual), também sem som: descarta o tempo
+parcial do passo atual e remove o registro do passo anterior da sessão — ao
+terminá-lo de novo, gera registro novo. O `AudioContext` é retomado se
+estiver suspenso e fechado em `onunload()` (`closeAudio()`).
+
+UI do countdown (`view.ts`): anel de progresso em SVG ao redor do relógio
+(trilha + arco com stroke em degradê; o `update()` só mexe no
+`stroke-dashoffset`, o SVG não é reconstruído a cada tick), estimativas de
+término ("termina às HH:MM" do passo, "Tudo acaba às HH:MM" da rotina,
+recalculadas de `Date.now()` a cada emissão) e soma da duração total abaixo
+da lista de passos. Controles são botões circulares de ícone (voltar,
+play/pause, pular, resetar), desabilitados quando não aplicáveis.
 
 ## Rotinas: descoberta e seleção
 
@@ -138,8 +149,11 @@ Regras (implementadas no engine, formatadas em `src/history.ts`):
   constantes module-level em SCREAMING_SNAKE (`LEGACY_ROUTINE_PATH`).
 - Arquivos de `src/` em minúsculas, um conceito por arquivo.
 - Classes CSS com prefixo `brita-`; estados como `is-current`/`is-done`.
-  Cores e espaçamentos sempre via variáveis CSS do Obsidian (`--text-accent`,
-  `--size-4-*`), nunca hardcoded.
+  Cores e espaçamentos via variáveis CSS do Obsidian (`--size-4-*`,
+  `--text-muted`…). **Única exceção hardcoded**: o degradê de identidade
+  azul→rosa (`--brita-accent-1`/`--brita-accent-2`/`--brita-grad`, definidos
+  em `.brita-timer`), usado no anel, no botão principal, no relógio e no
+  passo atual.
 - Tipo da view: `brita-routine-timer` (`VIEW_TYPE_ROUTINE_TIMER`).
 - Strings de UI em português; código e identificadores em inglês.
 - Durações: segundos inteiros no modelo (`durationSec`); milissegundos só

@@ -1,6 +1,15 @@
 /* Brita Routines */
 
 .brita-timer {
+	/* Único par de cores hardcoded do plugin: o degradê de identidade
+	   (azul → rosa), usado no anel, no botão principal e nos destaques. */
+	--brita-accent-1: #5b8cff;
+	--brita-accent-2: #ff5fa2;
+	--brita-grad: linear-gradient(
+		135deg,
+		var(--brita-accent-1),
+		var(--brita-accent-2)
+	);
 	display: flex;
 	flex-direction: column;
 	gap: var(--size-4-3);
@@ -21,57 +30,168 @@
 	text-overflow: ellipsis;
 }
 
+/* Countdown ------------------------------------------------------------- */
+
 .brita-countdown {
 	text-align: center;
-	padding: var(--size-4-4) 0;
-	border-radius: var(--radius-m);
+	padding: var(--size-4-4) var(--size-4-3);
+	border-radius: var(--radius-l);
 	background-color: var(--background-secondary);
+}
+
+.brita-ring-wrap {
+	position: relative;
+	width: min(210px, 100%);
+	margin: 0 auto;
+}
+
+.brita-ring {
+	display: block;
+	width: 100%;
+	height: auto;
+}
+
+.brita-ring-track {
+	stroke: var(--background-modifier-border);
+	stroke-width: 6;
+}
+
+.brita-ring-progress {
+	stroke-width: 6;
+	stroke-linecap: round;
+	transition: stroke-dashoffset 0.25s linear;
+}
+
+.brita-ring-content {
+	position: absolute;
+	inset: 0;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	gap: var(--size-2-1);
+	padding: 14%;
+	text-align: center;
 }
 
 .brita-step-name {
 	font-size: var(--font-ui-medium);
 	color: var(--text-muted);
-	margin-bottom: var(--size-4-1);
+	overflow-wrap: anywhere;
 }
 
 .brita-step-time {
-	font-size: 2.6em;
+	font-size: 2.2em;
 	font-variant-numeric: tabular-nums;
 	font-weight: var(--font-bold);
 	line-height: 1.1;
+	background: var(--brita-grad);
+	-webkit-background-clip: text;
+	background-clip: text;
+	color: transparent;
 }
 
-.brita-total-time {
-	margin-top: var(--size-4-2);
+.brita-step-eta {
+	font-size: var(--font-ui-smaller);
+	color: var(--text-faint);
+}
+
+.brita-total-time,
+.brita-routine-eta {
+	margin-top: var(--size-2-2);
 	font-size: var(--font-ui-smaller);
 	color: var(--text-faint);
 	font-variant-numeric: tabular-nums;
 }
 
+.brita-routine-eta {
+	margin-top: 0;
+	color: var(--text-muted);
+}
+
+/* Controles ------------------------------------------------------------- */
+
 .brita-controls {
 	display: flex;
-	flex-wrap: wrap;
-	gap: var(--size-4-2);
+	align-items: center;
 	justify-content: center;
+	gap: var(--size-4-3);
 }
+
+.brita-ctrl {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 38px;
+	height: 38px;
+	padding: 0;
+	border: none;
+	border-radius: 50%;
+	background-color: var(--background-secondary);
+	color: var(--text-muted);
+	cursor: pointer;
+	box-shadow: none;
+	transition:
+		transform 0.1s ease,
+		color 0.15s ease;
+}
+
+.brita-ctrl:hover:not(:disabled) {
+	color: var(--text-normal);
+	transform: scale(1.06);
+}
+
+.brita-ctrl:disabled {
+	opacity: 0.35;
+	cursor: default;
+}
+
+.brita-ctrl-main {
+	width: 54px;
+	height: 54px;
+	background: var(--brita-grad);
+	color: white;
+	box-shadow: var(--shadow-s);
+}
+
+.brita-ctrl-main:hover:not(:disabled) {
+	color: white;
+	filter: brightness(1.08);
+}
+
+.brita-ctrl-main .svg-icon {
+	width: 24px;
+	height: 24px;
+}
+
+/* Lista de passos -------------------------------------------------------- */
 
 .brita-steps {
 	margin: 0;
 	padding-left: var(--size-4-5);
 	display: flex;
 	flex-direction: column;
-	gap: var(--size-4-1);
+	gap: var(--size-2-3);
 }
 
 .brita-step {
 	display: flex;
 	justify-content: space-between;
 	gap: var(--size-4-2);
+	padding: var(--size-2-1) var(--size-2-2);
+	border-radius: var(--radius-s);
+}
+
+.brita-step.is-current {
+	background-color: var(--background-secondary);
 }
 
 .brita-step.is-current .brita-step-label {
 	font-weight: var(--font-bold);
-	color: var(--text-accent);
+	background: var(--brita-grad);
+	-webkit-background-clip: text;
+	background-clip: text;
+	color: transparent;
 }
 
 .brita-step.is-done {
@@ -82,4 +202,15 @@
 .brita-step-duration {
 	font-variant-numeric: tabular-nums;
 	color: var(--text-muted);
+}
+
+.brita-steps-total {
+	display: flex;
+	justify-content: space-between;
+	gap: var(--size-4-2);
+	padding: var(--size-2-3) var(--size-2-2) 0;
+	border-top: 1px solid var(--background-modifier-border);
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+	font-weight: var(--font-medium);
 }
