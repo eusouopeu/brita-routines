@@ -1,7 +1,16 @@
-import { Notice, Plugin, TFile, TFolder } from "obsidian";
+import { Notice, Plugin, TFile, TFolder, moment } from "obsidian";
+import {
+	appHasDailyNotesPluginLoaded,
+	createDailyNote,
+	getAllDailyNotes,
+	getDailyNote,
+} from "obsidian-daily-notes-interface";
 import { SessionRecord, TimerEngine } from "./src/engine";
+import { formatSessionCallout, insertIntoSection } from "./src/daily-log";
 import { formatSessionEntry, HISTORY_FILE_HEADER } from "./src/history";
+import { DayPlannerView, VIEW_TYPE_DAY_PLANNER } from "./src/planner-view";
 import { SAMPLE_ROUTINE, parseRoutine } from "./src/routine";
+import { ScheduledEntry, entryToRoutine } from "./src/schedule";
 import {
 	BritaSettings,
 	BritaSettingTab,
@@ -40,6 +49,7 @@ export default class BritaRoutinesPlugin extends Plugin {
 			},
 			onSessionEnd: (record) => {
 				void this.appendSessionToHistory(record);
+				void this.appendSessionToDailyNote(record);
 			},
 		});
 
@@ -49,15 +59,28 @@ export default class BritaRoutinesPlugin extends Plugin {
 			VIEW_TYPE_ROUTINE_TIMER,
 			(leaf) => new RoutineTimerView(leaf, this),
 		);
+		this.registerView(
+			VIEW_TYPE_DAY_PLANNER,
+			(leaf) => new DayPlannerView(leaf, this),
+		);
 
 		this.addRibbonIcon("timer", "Abrir Brita Routines", () => {
 			void this.activateView();
+		});
+		this.addRibbonIcon("calendar-clock", "Abrir planner do dia", () => {
+			void this.activatePlannerView();
 		});
 
 		this.addCommand({
 			id: "open-timer-panel",
 			name: "Abrir painel de rotina",
 			callback: () => void this.activateView(),
+		});
+
+		this.addCommand({
+			id: "open-day-planner",
+			name: "Abrir planner do dia",
+			callback: () => void this.activatePlannerView(),
 		});
 
 		this.addCommand({
@@ -168,6 +191,59 @@ export default class BritaRoutinesPlugin extends Plugin {
 			.sort((a, b) => a.basename.localeCompare(b.basename));
 	}
 
+	/** Nota .md da pasta de rotinas cujo basename bate com o nome (case-insensitive). */
+	findRoutineByName(name: string): TFile | null {
+		const target = name.trim().toLowerCase();
+		return (
+			this.listRoutineFiles().find(
+				(f) => f.basename.toLowerCase() === target,
+			) ?? null
+		);
+	}
+
+	/** Existe uma rotina com esse nome na pasta configurada? */
+	hasRoutineNamed(name: string): boolean {
+		return this.findRoutineByName(name) !== null;
+	}
+
+	/**
+	 * Inicia um compromisso do planner. Evento não faz nada. Rotina inline
+	 * carrega os passos direto no engine (sem persistir como ativa); "@Rotina"
+	 * resolve a nota da pasta e a torna ativa. Em ambos, pede confirmação se
+	 * houver rotina em andamento e revela o painel do timer.
+	 */
+	async startScheduledEntry(entry: ScheduledEntry): Promise<void> {
+		if (entry.kind === "event") return;
+
+		const status = this.engine.getSnapshot().status;
+		if (
+			(status === "running" || status === "paused") &&
+			!confirm(
+				"Uma rotina está em andamento. Iniciar esta reseta o timer atual. Continuar?",
+			)
+		) {
+			return;
+		}
+
+		if (entry.kind === "routine-ref") {
+			const file = this.findRoutineByName(entry.routineName ?? entry.title);
+			if (!file) {
+				new Notice(`Rotina não encontrada: ${entry.routineName ?? entry.title}`);
+				return;
+			}
+			await this.setActiveRoutine(file.path, false);
+		} else {
+			const routine = entryToRoutine(entry);
+			if (!routine) {
+				new Notice("Compromisso sem passos válidos para virar rotina");
+				return;
+			}
+			this.engine.setRoutine(routine);
+		}
+		this.engine.start();
+		await this.activateView();
+	}
+
 	/** Troca a rotina ativa (reseta o timer via setRoutine). */
 	async setActiveRoutine(path: string | null, notify: boolean): Promise<void> {
 		this.settings.activeRoutinePath = path;
@@ -256,6 +332,81 @@ export default class BritaRoutinesPlugin extends Plugin {
 		}
 	}
 
+	/** Nota diária de hoje via Daily Notes core (null se o plugin core estiver off ou não existir). */
+	getTodayDailyNote(): TFile | null {
+		if (!appHasDailyNotesPluginLoaded()) return null;
+		try {
+			return getDailyNote(moment(), getAllDailyNotes()) ?? null;
+		} catch (error) {
+			console.error("Brita Routines: falha ao resolver nota diária", error);
+			return null;
+		}
+	}
+
+	/** Abre a nota diária de hoje, criando-a se necessário. */
+	async openTodayDailyNote(): Promise<void> {
+		if (!appHasDailyNotesPluginLoaded()) {
+			new Notice('Ative o plugin core "Daily notes" para usar o planner.');
+			return;
+		}
+		let file = this.getTodayDailyNote();
+		try {
+			if (!file) file = (await createDailyNote(moment())) ?? null;
+		} catch (error) {
+			console.error("Brita Routines: falha ao criar nota diária", error);
+		}
+		if (file) await this.app.workspace.getLeaf(false).openFile(file);
+	}
+
+	/**
+	 * Ao concluir uma rotina, registra na nota diária de hoje: o nome na
+	 * propriedade multiselect do frontmatter (se configurada) e/ou um callout
+	 * de resumo legível (se habilitado). Só sessões concluídas — abandono não
+	 * polui o dia.
+	 */
+	private async appendSessionToDailyNote(record: SessionRecord): Promise<void> {
+		if (record.outcome !== "completed") return;
+		const wantsLog = this.settings.dailyLogEnabled;
+		const wantsProp = this.settings.dailyProperty.trim().length > 0;
+		if (!wantsLog && !wantsProp) return;
+		if (!appHasDailyNotesPluginLoaded()) return;
+
+		let file = this.getTodayDailyNote();
+		if (!file && this.settings.createDailyNoteIfMissing) {
+			try {
+				file = (await createDailyNote(moment())) ?? null;
+			} catch (error) {
+				console.error("Brita Routines: falha ao criar nota diária", error);
+			}
+		}
+		if (!file) return;
+
+		try {
+			if (wantsProp) {
+				const key = this.settings.dailyProperty.trim();
+				await this.app.fileManager.processFrontMatter(file, (fm) => {
+					const existing = fm[key];
+					const list = Array.isArray(existing)
+						? existing.slice()
+						: existing != null && existing !== ""
+							? [existing]
+							: [];
+					if (!list.includes(record.routineName)) list.push(record.routineName);
+					fm[key] = list;
+				});
+			}
+			if (wantsLog) {
+				const callout = formatSessionCallout(record);
+				await this.app.vault.process(file, (data) =>
+					insertIntoSection(data, callout, this.settings.dailyLogHeading),
+				);
+			}
+		} catch (error) {
+			console.error("Brita Routines: falha ao gravar na nota diária", error);
+			new Notice("Não foi possível escrever na nota diária");
+		}
+	}
+
 	private async ensureParentFolders(filePath: string): Promise<void> {
 		const parts = filePath.split("/").slice(0, -1);
 		let prefix = "";
@@ -277,6 +428,19 @@ export default class BritaRoutinesPlugin extends Plugin {
 		const leaf = workspace.getRightLeaf(false);
 		if (!leaf) return;
 		await leaf.setViewState({ type: VIEW_TYPE_ROUTINE_TIMER, active: true });
+		await workspace.revealLeaf(leaf);
+	}
+
+	async activatePlannerView(): Promise<void> {
+		const { workspace } = this.app;
+		const existing = workspace.getLeavesOfType(VIEW_TYPE_DAY_PLANNER);
+		if (existing.length > 0) {
+			await workspace.revealLeaf(existing[0]);
+			return;
+		}
+		const leaf = workspace.getRightLeaf(false);
+		if (!leaf) return;
+		await leaf.setViewState({ type: VIEW_TYPE_DAY_PLANNER, active: true });
 		await workspace.revealLeaf(leaf);
 	}
 }
