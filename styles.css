@@ -209,3 +209,139 @@
 	color: var(--text-muted);
 	font-weight: var(--font-medium);
 }
+
+/* Planner do dia -------------------------------------------------------- */
+
+.brita-planner {
+	--brita-accent-1: #5b8cff;
+	--brita-accent-2: #ff5fa2;
+	--brita-grad: linear-gradient(
+		135deg,
+		var(--brita-accent-1),
+		var(--brita-accent-2)
+	);
+	display: flex;
+	flex-direction: column;
+	gap: var(--size-4-3);
+	padding: var(--size-4-3);
+}
+
+.brita-planner-header {
+	display: flex;
+	align-items: flex-start;
+	justify-content: space-between;
+	gap: var(--size-4-2);
+}
+
+.brita-planner-title {
+	font-size: var(--font-ui-large);
+	font-weight: var(--font-bold);
+}
+
+.brita-planner-date {
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+	font-variant-numeric: tabular-nums;
+}
+
+.brita-planner-empty {
+	padding: var(--size-4-4) var(--size-4-2);
+	text-align: center;
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+	background-color: var(--background-secondary);
+	border-radius: var(--radius-m);
+}
+
+.brita-planner-list {
+	display: flex;
+	flex-direction: column;
+	gap: var(--size-2-2);
+}
+
+.brita-entry {
+	display: flex;
+	align-items: center;
+	gap: var(--size-4-2);
+	padding: var(--size-2-2) var(--size-2-3);
+	border-radius: var(--radius-m);
+	background-color: var(--background-secondary);
+	border-left: 3px solid var(--background-modifier-border);
+}
+
+.brita-entry-inline-routine,
+.brita-entry-routine-ref {
+	border-left-color: var(--brita-accent-1);
+}
+
+.brita-entry-time {
+	flex: 0 0 auto;
+	min-width: 3.2em;
+	font-variant-numeric: tabular-nums;
+	font-weight: var(--font-medium);
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+}
+
+.brita-entry-body {
+	flex: 1;
+	min-width: 0;
+}
+
+.brita-entry-title {
+	overflow-wrap: anywhere;
+}
+
+.brita-entry-meta {
+	font-size: var(--font-ui-smaller);
+	color: var(--text-faint);
+}
+
+.brita-entry-play {
+	flex: 0 0 auto;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 30px;
+	height: 30px;
+	border-radius: 50%;
+	color: white;
+	background: var(--brita-grad);
+	cursor: pointer;
+	box-shadow: var(--shadow-s);
+}
+
+.brita-entry-play:hover:not(:disabled) {
+	filter: brightness(1.08);
+}
+
+.brita-entry-play:disabled {
+	background: var(--background-modifier-border);
+	color: var(--text-faint);
+	box-shadow: none;
+	cursor: default;
+}
+
+.brita-now {
+	display: flex;
+	align-items: center;
+	gap: var(--size-2-2);
+	margin: var(--size-2-1) 0;
+	color: var(--brita-accent-2);
+	font-size: var(--font-ui-smaller);
+	font-weight: var(--font-bold);
+	text-transform: uppercase;
+	letter-spacing: 0.04em;
+}
+
+.brita-now::after {
+	content: "";
+	flex: 1;
+	height: 2px;
+	border-radius: 2px;
+	background: var(--brita-grad);
+}
+
+.brita-now-time {
+	font-variant-numeric: tabular-nums;
+}

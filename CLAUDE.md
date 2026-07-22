@@ -6,6 +6,14 @@ pausa, som/Notice ao concluir). Suporta múltiplas rotinas (pasta configurável
 do vault, seletor no painel) e histórico de execuções (log markdown
 Dataview-friendly com duração real por passo).
 
+Incorpora também um **planner do dia** (segunda view na barra lateral): lê o
+plano escrito na nota diária de hoje e desenha os compromissos como timeline,
+com os que são rotinas virando botões que carregam e iniciam a rotina no
+engine. E integra com as **notas diárias**: ao concluir uma rotina, grava um
+callout de resumo legível e/ou o nome numa propriedade multiselect do
+frontmatter. A resolução da nota diária usa o Daily Notes core (dependência
+`obsidian-daily-notes-interface`).
+
 ## Build
 
 - `npm run dev` — esbuild em watch mode (sourcemap inline).
@@ -31,15 +39,29 @@ Três camadas, com dependências só de cima para baixo:
   `SessionRecord` em markdown com inline fields do Dataview. Quem escreve no
   vault é o plugin (`appendSessionToHistory` em `main.ts`, via
   `vault.process`/`vault.create`).
+- **Schedule** (`src/schedule.ts`) — tipos puros `ScheduledEntry` e o parser
+  do plano da nota diária (`parseSchedule`), mais `entryToRoutine` (converte
+  compromisso inline em `Routine`) e `formatMinutes`. Sem Obsidian.
+- **Log da nota diária** (`src/daily-log.ts`) — formatação pura de
+  `SessionRecord` num callout legível (`formatSessionCallout`) e a inserção
+  idempotente numa seção do markdown (`insertIntoSection`). Quem escreve é o
+  plugin (`appendSessionToDailyNote`).
 - **Settings** (`src/settings.ts`) — `BritaSettings` + `DEFAULT_SETTINGS` +
   `BritaSettingTab` (pasta de rotinas, arquivo de histórico, toggle de
-  registro). Persistência via `loadData`/`saveData` do plugin.
+  registro; e para a nota diária: toggle do callout, título da seção,
+  propriedade multiselect e criar-nota-se-faltar). Persistência via
+  `loadData`/`saveData` do plugin.
 - **View** (`src/view.ts`) — `RoutineTimerView` (ItemView na sidebar direita).
   Não guarda estado de timer; se inscreve no engine ao abrir. Só reconstrói o
   DOM quando **status ou rotina** mudam; nos demais ticks atualiza no lugar os
   textos do countdown e as classes `is-done`/`is-current` da lista (refs
   guardadas em `build()`). Isso preserva foco de teclado, cliques e a região
   `aria-live` do nome do passo (que anuncia trocas em leitores de tela).
+- **Planner** (`src/planner-view.ts`) — `DayPlannerView` (segunda ItemView,
+  `brita-day-planner`). Lê o plano da nota diária de hoje (via Daily Notes
+  core), parseia com `parseSchedule` e desenha a timeline com linha do "agora".
+  Não conhece o engine além de delegar o start ao plugin
+  (`startScheduledEntry`).
 
 **Onde vive o estado do timer**: no plugin (`main.ts`), que cria o
 `TimerEngine` único em `onload()` e registra o tick (`setInterval` de 250 ms
@@ -115,8 +137,80 @@ O botão de recarregar no cabeçalho da view relê o arquivo (e reseta o timer,
 porque `setRoutine()` reseta). Com rotina em andamento (running/paused), pede
 confirmação (`confirm()`) antes — mesmo padrão do dropdown de troca.
 
-Comandos: `open-timer-panel` (abre o painel) e `toggle-timer`
-(iniciar/pausar pela paleta, sem precisar do painel).
+Comandos: `open-timer-panel` (abre o painel do timer), `toggle-timer`
+(iniciar/pausar pela paleta, sem precisar do painel) e `open-day-planner`
+(abre a timeline do dia). Dois ribbons: `timer` (painel) e `calendar-clock`
+(planner).
+
+## Planner do dia
+
+Segunda view na barra lateral (`DayPlannerView`, `src/planner-view.ts`). Lê o
+plano escrito na **nota diária de hoje** (resolvida pelo Daily Notes core) e
+desenha os compromissos ordenados por hora, com uma linha do "agora"
+inserida na posição correta. Cada compromisso é um item de lista da nota:
+
+```markdown
+- 07:30 - 09:00 Reunião de equipe   <!-- evento (janela); só exibe -->
+- 07:30 - Rotina da Manhã           <!-- rotina inline: passos-filho abaixo -->
+    - Alongar - 05:00
+    - Meditar - 10:00
+- 12:30 - @Treino                   <!-- referência à nota "Treino" da pasta -->
+```
+
+Regras do parser (`parseSchedule` em `src/schedule.ts`):
+
+- Compromisso = item de lista `- HH:MM - resto` (checkbox opcional). O separador
+  após a hora é ` - `.
+- `resto` começando por outra `HH:MM ` ⇒ **evento** com janela (kind `event`);
+  começando por `@` ⇒ **referência** de rotina (kind `routine-ref`, nome = texto
+  após o `@`); caso contrário ⇒ evento simples que vira **rotina inline** (kind
+  `inline-routine`) **se** tiver passos-filho.
+- Passo-filho = item de lista mais indentado no formato `- Nome - MM:SS` (ou
+  `- Nome - HH:MM:SS`). Note: `MM:SS` aqui, diferente do `HH:MM:SS` do arquivo
+  de rotina. Duração inválida ou `00:00` ⇒ passo ignorado.
+- Hora inválida (≥ 24h/60min) ⇒ compromisso ignorado. Linhas fora do formato
+  são ignoradas e encerram a coleta de passos-filho do compromisso corrente.
+
+Clicar no ▶ de um compromisso chama `plugin.startScheduledEntry()`: `event`
+não faz nada; `routine-ref` resolve a nota por basename (`findRoutineByName`,
+case-insensitive) e a torna ativa (`setActiveRoutine`); `inline-routine`
+carrega os passos direto no engine (`entryToRoutine` → `setRoutine`, sem
+persistir como ativa). Em ambos, se houver rotina em andamento pede
+`confirm()`, e ao iniciar revela o painel do timer. Referência inexistente
+mostra o botão desabilitado ("rotina não encontrada").
+
+A view mantém o conteúdo lido em cache: relê o vault só quando a **nota de
+hoje** muda (`modify`) ou o dia vira; o tick de 30 s apenas redesenha para
+mover a linha do "agora". `create`/`rename`/`delete` e mudanças na lista de
+rotinas (`onRoutineListChanged`) também disparam releitura/redesenho.
+
+## Integração com a nota diária
+
+Ao concluir uma rotina (`onSessionEnd` com `outcome: completed`),
+`appendSessionToDailyNote` grava na nota diária de hoje (Daily Notes core;
+cria a nota se `settings.createDailyNoteIfMissing`). Abandono não escreve.
+Duas gravações independentes, conforme settings:
+
+- **Callout de resumo** (`settings.dailyLogEnabled`): bloco legível a olho
+  nu, sem inline fields, inserido na seção `## {dailyLogHeading}` (default
+  `Rotinas`, criada se faltar) via `insertIntoSection`. Formatado em
+  `src/daily-log.ts`:
+
+  ```markdown
+  > [!success]- Rotina da Manhã — 07:30→07:53 · 22 min ativos
+  > - Alongar — 05:07
+  > - ~~Tomar café~~ — pulado
+  ```
+
+  Colapsado por padrão (`[!success]-`); a inserção garante linha em branco
+  antes do bloco (senão callouts consecutivos se fundiriam). Duração do
+  título é amigável (`22 min`, `1 h 05 min`); passos usam `formatDuration` da
+  UI (`MM:SS`).
+
+- **Propriedade multiselect** (`settings.dailyProperty`, default `rotinas`;
+  vazio = desliga): adiciona o nome da rotina à lista do frontmatter via
+  `fileManager.processFrontMatter`, sem duplicar. Renderiza como multiselect
+  nativo do Obsidian e viabiliza dashboards Dataview de hábitos por dia.
 
 ## Histórico de execuções
 
@@ -152,9 +246,11 @@ Regras (implementadas no engine, formatadas em `src/history.ts`):
   Cores e espaçamentos via variáveis CSS do Obsidian (`--size-4-*`,
   `--text-muted`…). **Única exceção hardcoded**: o degradê de identidade
   azul→rosa (`--brita-accent-1`/`--brita-accent-2`/`--brita-grad`, definidos
-  em `.brita-timer`), usado no anel, no botão principal, no relógio e no
-  passo atual.
-- Tipo da view: `brita-routine-timer` (`VIEW_TYPE_ROUTINE_TIMER`).
+  em `.brita-timer` e replicados em `.brita-planner`), usado no anel, no botão
+  principal, no relógio, no passo atual, na linha do "agora" e nos botões do
+  planner.
+- Tipos das views: `brita-routine-timer` (`VIEW_TYPE_ROUTINE_TIMER`) e
+  `brita-day-planner` (`VIEW_TYPE_DAY_PLANNER`).
 - Strings de UI em português; código e identificadores em inglês.
 - Durações: segundos inteiros no modelo (`durationSec`); milissegundos só
   dentro do engine.
@@ -167,6 +263,11 @@ Regras (implementadas no engine, formatadas em `src/history.ts`):
 - **Settings de som** (on/off, volume) e auto-início opcional do próximo
   passo.
 - Editar a rotina pela view (hoje é só leitura do markdown).
+- Editar o plano pela timeline: o planner é só leitura da nota diária
+  (não marca linha como feita nem reordena). O log de conclusão vai para a
+  seção de callouts, não altera o plano.
+- Disparo automático no horário agendado (sem scheduler/notificação quando
+  chega a hora do compromisso; iniciar é sempre pelo clique no ▶).
 - Dashboards embutidos no plugin (o histórico markdown é a base; a
   visualização fica com Dataview/plugins de calendário do usuário).
 - Rotação/arquivamento do log (cresce indefinidamente; caminho configurável,
